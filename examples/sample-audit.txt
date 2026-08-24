@@ -1,0 +1,10 @@
+$ cw-log-retention-guard audit --max-days 30 --region eu-west-1
+LOG GROUP                         RETENTION  STORED     STATUS
+/aws/lambda/checkout-prod         never      6.4 GiB    unbounded
+/aws/lambda/mailer                365d       210.0 MiB  over-threshold
+/aws/rds/instance/pg/postgresql   14d        1.2 GiB    ok
+/ecs/payments                     never      3.1 GiB    unbounded
+
+4 group(s), 3 violation(s) (2 unbounded, 1 over-threshold)
+$ echo $?
+1

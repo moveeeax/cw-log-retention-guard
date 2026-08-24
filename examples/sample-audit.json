@@ -1,0 +1,24 @@
+{
+  "region": "eu-west-1",
+  "maxDays": 30,
+  "findings": [
+    {
+      "logGroup": "/aws/lambda/checkout-prod",
+      "retentionDays": null,
+      "storedBytes": 6871947674,
+      "status": "unbounded"
+    },
+    {
+      "logGroup": "/aws/lambda/mailer",
+      "retentionDays": 365,
+      "storedBytes": 220200960,
+      "status": "over-threshold"
+    },
+    {
+      "logGroup": "/aws/rds/instance/pg/postgresql",
+      "retentionDays": 14,
+      "storedBytes": 1288490188,
+      "status": "ok"
+    }
+  ]
+}
