@@ -8,8 +8,7 @@ on:
 
 jobs:
   build:
-    # Self-hosted ARC runner: runs-on == the gha-runner-scale-set release name.
-    runs-on: cw-log-retention-guard
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
