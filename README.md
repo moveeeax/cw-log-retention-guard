@@ -1,7 +1,7 @@
 # cw-log-retention-guard
 
 [![ci](https://github.com/moveeeax/cw-log-retention-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/moveeeax/cw-log-retention-guard/actions/workflows/ci.yml)
-[![Go](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Audit and enforce a retention baseline on CloudWatch Log Groups **before the storage bill does it for you.**
@@ -59,6 +59,7 @@ LOG GROUP                         RETENTION  STORED     STATUS
 /aws/lambda/checkout-prod         never      6.4 GiB    unbounded
 /aws/lambda/mailer                365d       210.0 MiB  over-threshold
 /aws/rds/instance/pg/postgresql   14d        1.2 GiB    ok
+/ecs/payments                     never      3.1 GiB    unbounded
 
 4 group(s), 3 violation(s) (2 unbounded, 1 over-threshold)
 ```
