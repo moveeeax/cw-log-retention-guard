@@ -3,6 +3,7 @@ package guard
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -214,5 +215,104 @@ func TestRenderTableSummary(t *testing.T) {
 	}
 	if !strings.Contains(out, "never") || !strings.Contains(out, "1.0 GiB") {
 		t.Errorf("table body wrong:\n%s", out)
+	}
+}
+
+func TestValidateRetention(t *testing.T) {
+	for _, d := range []int{1, 30, 365, 3653} {
+		if err := ValidateRetention(d); err != nil {
+			t.Errorf("%d: unexpected error %v", d, err)
+		}
+	}
+	for _, d := range []int{-1, 0, 2, 31, 3650, 1 << 40} {
+		if err := ValidateRetention(d); err == nil {
+			t.Errorf("%d: expected error", d)
+		}
+	}
+}
+
+func TestFixRejectsInvalidRetentionBeforeAPICall(t *testing.T) {
+	m := &mockCWLogs{pages: [][]types.LogGroup{{lg("unbounded", nil, 0)}}}
+	rep, err := Audit(context.Background(), m, "us-east-1", 30)
+	if err != nil {
+		t.Fatalf("audit: %v", err)
+	}
+	fixed, err := Fix(context.Background(), m, rep, 45)
+	if err == nil {
+		t.Fatal("expected error for 45 days")
+	}
+	if fixed != 0 || len(m.putCalls) != 0 {
+		t.Errorf("want no API calls, got fixed=%d calls=%d", fixed, len(m.putCalls))
+	}
+	if rep.Findings[0].Fixed {
+		t.Error("finding marked fixed")
+	}
+}
+
+func TestPlanListsViolationsOnly(t *testing.T) {
+	m := &mockCWLogs{pages: [][]types.LogGroup{{
+		lg("unbounded", nil, 0),
+		lg("ok", aws.Int32(30), 0),
+		lg("too-long", aws.Int32(365), 0),
+	}}}
+	rep, err := Audit(context.Background(), m, "us-east-1", 30)
+	if err != nil {
+		t.Fatalf("audit: %v", err)
+	}
+	plan := Plan(rep, 14)
+	if len(plan) != 2 {
+		t.Fatalf("want 2 changes, got %d", len(plan))
+	}
+	if plan[0].LogGroup != "too-long" || aws.ToInt32(plan[0].From) != 365 || plan[0].To != 14 {
+		t.Errorf("change 0 wrong: %+v", plan[0])
+	}
+	if plan[1].LogGroup != "unbounded" || plan[1].From != nil || plan[1].To != 14 {
+		t.Errorf("change 1 wrong: %+v", plan[1])
+	}
+	if len(m.putCalls) != 0 {
+		t.Errorf("plan made %d API calls", len(m.putCalls))
+	}
+	if rep.Findings[0].Fixed || rep.Findings[2].Fixed {
+		t.Error("plan mutated the report")
+	}
+}
+
+func TestRenderPlanTable(t *testing.T) {
+	plan := []Change{
+		{LogGroup: "/aws/lambda/mailer", From: aws.Int32(365), To: 30},
+		{LogGroup: "/ecs/payments", From: nil, To: 30},
+	}
+	var buf bytes.Buffer
+	if err := RenderPlanTable(&buf, plan); err != nil {
+		t.Fatalf("render plan table: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"LOG GROUP", "CURRENT -> NEW", "365d -> 30d", "never -> 30d", "dry run: 2 group(s) would change"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("plan table missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderPlanJSON(t *testing.T) {
+	var buf bytes.Buffer
+	plan := []Change{{LogGroup: "g", From: nil, To: 7}, {LogGroup: "h", From: aws.Int32(90), To: 7}}
+	if err := RenderPlanJSON(&buf, plan); err != nil {
+		t.Fatalf("render plan json: %v", err)
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, buf.String())
+	}
+	if len(got) != 2 || got[0]["group"] != "g" || got[0]["from"] != nil || got[0]["to"] != float64(7) || got[1]["from"] != float64(90) {
+		t.Errorf("unexpected plan json: %s", buf.String())
+	}
+
+	buf.Reset()
+	if err := RenderPlanJSON(&buf, Plan(&Report{}, 7)); err != nil {
+		t.Fatalf("render empty plan: %v", err)
+	}
+	if strings.TrimSpace(buf.String()) != "[]" {
+		t.Errorf("empty plan should be [], got %q", buf.String())
 	}
 }

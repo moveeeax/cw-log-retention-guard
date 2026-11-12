@@ -21,7 +21,11 @@ no retention or retention above your baseline, and exits non-zero so it doubles 
 - It prints a table (or `--json`) and **exits `1` when any group violates the baseline**, so a CI
   job fails the moment someone ships an un-bounded log group.
 - `fix` re-runs the audit and calls `PutRetentionPolicy(--set-days)` on every violating group,
-  leaving compliant groups untouched.
+  leaving compliant groups untouched. `fix --dry-run` prints the change set instead and calls
+  nothing but `DescribeLogGroups`.
+- `--set-days` must be a retention CloudWatch Logs accepts: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150,
+  180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288 or 3653. Any other value is rejected
+  (exit `2`) before the first API call, so `fix` never stops halfway through the offenders.
 
 `--max-days 0` disables the over-threshold check and flags only unbounded groups.
 
@@ -48,6 +52,9 @@ cw-log-retention-guard audit --max-days 30 --region eu-west-1
 # machine-readable
 cw-log-retention-guard audit --max-days 30 --json
 
+# review what fix would change (exit 0, nothing applied)
+cw-log-retention-guard fix --set-days 30 --max-days 30 --dry-run
+
 # enforce a 30-day baseline on every offender
 cw-log-retention-guard fix --set-days 30 --max-days 30
 ```
@@ -64,6 +71,34 @@ LOG GROUP                         RETENTION  STORED     STATUS
 4 group(s), 3 violation(s) (2 unbounded, 1 over-threshold)
 ```
 
+Example dry-run output:
+
+```text
+LOG GROUP                  CURRENT -> NEW
+/aws/lambda/checkout-prod  never -> 30d
+/aws/lambda/mailer         365d -> 30d
+/ecs/payments              never -> 30d
+
+dry run: 3 group(s) would change, no API calls made
+```
+
+With `--json` the dry run emits an array, `from` is `null` for a group that never expires:
+
+```json
+[
+  {
+    "group": "/aws/lambda/checkout-prod",
+    "from": null,
+    "to": 30
+  },
+  {
+    "group": "/aws/lambda/mailer",
+    "from": 365,
+    "to": 30
+  }
+]
+```
+
 Credentials and region resolve through the standard AWS chain (`AWS_PROFILE`, `AWS_REGION`,
 env vars, shared config). `--region` and `--profile` override them.
 
@@ -72,14 +107,16 @@ env vars, shared config). `--region` and `--profile` override them.
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--max-days` | `30` | Flag retention above N days; `0` flags only unbounded groups |
-| `--set-days` | `30` | Retention (days) applied by `fix` |
+| `--set-days` | `30` | Retention (days) applied by `fix`; one of the values CloudWatch accepts (see above) |
+| `--dry-run` | `false` | `fix` only: print `GROUP CURRENT -> NEW` for each change and exit `0` without applying |
 | `--region` | env/profile | AWS region |
 | `--profile` | env | AWS shared-config profile |
 | `--json` | `false` | Emit JSON instead of a table |
 
 ### IAM
 
-`audit` needs `logs:DescribeLogGroups`. `fix` additionally needs `logs:PutRetentionPolicy`.
+`audit` needs `logs:DescribeLogGroups`. `fix` additionally needs `logs:PutRetentionPolicy`;
+`fix --dry-run` needs only `logs:DescribeLogGroups`.
 
 ## As a CI gate
 

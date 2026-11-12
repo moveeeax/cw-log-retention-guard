@@ -135,10 +135,52 @@ func Audit(ctx context.Context, c CWLogsAPI, region string, maxDays int32) (*Rep
 	return rep, nil
 }
 
+// ValidRetentionDays lists the retention values PutRetentionPolicy accepts, as
+// documented on PutRetentionPolicyInput.RetentionInDays in the SDK.
+var ValidRetentionDays = []int32{
+	1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545,
+	731, 1096, 1827, 2192, 2557, 2922, 3288, 3653,
+}
+
+// ValidateRetention returns an error unless days is a value CloudWatch Logs
+// accepts for a retention policy.
+func ValidateRetention(days int) error {
+	for _, v := range ValidRetentionDays {
+		if int(v) == days {
+			return nil
+		}
+	}
+	return fmt.Errorf("retention of %d days is not accepted by CloudWatch Logs; allowed values: %v", days, ValidRetentionDays)
+}
+
+// Change is one retention update that Fix would apply.
+type Change struct {
+	LogGroup string `json:"group"`
+	From     *int32 `json:"from"` // nil = never expire
+	To       int32  `json:"to"`
+}
+
+// Plan returns the changes Fix(rep, setDays) would make, in report order,
+// without calling the API.
+func Plan(rep *Report, setDays int32) []Change {
+	plan := []Change{}
+	for _, f := range rep.Findings {
+		if !f.Violation() {
+			continue
+		}
+		plan = append(plan, Change{LogGroup: f.LogGroup, From: f.RetentionDays, To: setDays})
+	}
+	return plan
+}
+
 // Fix applies PutRetentionPolicy(setDays) to every violating group in rep,
 // mutating the findings in place to record the change. It stops at the first
-// API error so a partial run is reported truthfully.
+// API error so a partial run is reported truthfully. A setDays CloudWatch
+// does not accept is rejected before any API call.
 func Fix(ctx context.Context, c CWLogsAPI, rep *Report, setDays int32) (int, error) {
+	if err := ValidateRetention(int(setDays)); err != nil {
+		return 0, err
+	}
 	fixed := 0
 	for i := range rep.Findings {
 		f := &rep.Findings[i]

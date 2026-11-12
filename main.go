@@ -24,17 +24,22 @@ const usage = `cw-log-retention-guard - keep CloudWatch Log Groups from hoarding
 Usage:
   cw-log-retention-guard audit [flags]   Report groups with no/over-long retention (exit 1 on violations)
   cw-log-retention-guard fix   [flags]   Apply a retention policy to violating groups
+                                         (--dry-run prints the plan and changes nothing)
   cw-log-retention-guard version
 
 Flags:
   --max-days N    flag retention above N days; 0 flags only unbounded groups (default 30)
-  --set-days N    retention (days) applied by fix (default 30)
+  --set-days N    retention (days) applied by fix (default 30); must be one of
+                  1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545,
+                  731, 1096, 1827, 2192, 2557, 2922, 3288, 3653
+  --dry-run       fix only: print GROUP CURRENT -> NEW for each change, exit 0
   --region R      AWS region (default: from environment/profile)
   --profile P     AWS shared-config profile
   --json          emit JSON instead of a table
 
 Examples:
   cw-log-retention-guard audit --max-days 30 --json
+  cw-log-retention-guard fix --set-days 30 --max-days 30 --dry-run
   cw-log-retention-guard fix --set-days 30 --max-days 30`
 
 func main() {
@@ -127,11 +132,14 @@ func runFix(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("fix", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	c := bindCommon(fs)
+	dryRun := fs.Bool("dry-run", false, "print the planned changes without applying them")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if c.setDays <= 0 {
-		fmt.Fprintln(stderr, "error: --set-days must be a positive number of days")
+	// Reject unsupported values before any API call so a run never fails
+	// partway through the offender list.
+	if err := guard.ValidateRetention(c.setDays); err != nil {
+		fmt.Fprintln(stderr, "error: --set-days:", err)
 		return 2
 	}
 	client, region, err := newClient(ctx, c)
@@ -143,6 +151,19 @@ func runFix(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 2
+	}
+	if *dryRun {
+		plan := guard.Plan(rep, int32(c.setDays))
+		if c.json {
+			err = guard.RenderPlanJSON(stdout, plan)
+		} else {
+			err = guard.RenderPlanTable(stdout, plan)
+		}
+		if err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 2
+		}
+		return 0
 	}
 	fixed, err := guard.Fix(ctx, client, rep, int32(c.setDays))
 	if err != nil {
