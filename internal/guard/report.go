@@ -31,6 +31,29 @@ func RenderTable(w io.Writer, rep *Report) error {
 	return nil
 }
 
+// RenderPlanJSON writes the dry-run plan as an indented JSON array.
+func RenderPlanJSON(w io.Writer, plan []Change) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(plan)
+}
+
+// RenderPlanTable writes one "GROUP  CURRENT -> NEW" line per planned change
+// plus a one-line summary.
+func RenderPlanTable(w io.Writer, plan []Change) error {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "LOG GROUP\tCURRENT -> NEW")
+	for _, c := range plan {
+		to := c.To
+		fmt.Fprintf(tw, "%s\t%s -> %s\n", c.LogGroup, retentionLabel(c.From), retentionLabel(&to))
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "\ndry run: %d group(s) would change, no API calls made\n", len(plan))
+	return nil
+}
+
 func statusLabel(f Finding) string {
 	if f.Fixed && f.NewRetention != nil {
 		return fmt.Sprintf("fixed -> %dd", *f.NewRetention)
